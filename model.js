@@ -46,7 +46,8 @@ async function search_from_quickmart(product_names = []) {
     const browser = await chromium.launch({ headless: false }); // Set headless to false to see the browser
     const context = await browser.newContext({
       geolocation: { longitude: 36.74366, latitude: -1.28472 },
-      permissions: ['geolocation']
+      permissions: ['geolocation'],
+      timezoneId: 'Africa/Nairobi'
     });
 
 
@@ -94,6 +95,7 @@ async function search_from_quickmart(product_names = []) {
                     title: titleElement?.textContent.trim() || null,
                     price: priceElement?.textContent.trim() || null,
                     imageUrl: imageUrl?.startsWith('http') ? imageUrl : `https://www.quickmart.co.ke${imageUrl}` || null,
+                    store: 'quickmart'
                 };
             });
         });
@@ -111,6 +113,125 @@ async function search_from_quickmart(product_names = []) {
     return products_map;
 }
 
+async function search_from_naivas(product_names = []) {
+    const browser = await chromium.launch({ headless: false }); // Set headless to false to see the browser
+    const context = await browser.newContext({
+      geolocation: { longitude: 36.74366, latitude: -1.28472 },
+      permissions: ['geolocation'],
+      timezoneId: 'Africa/Nairobi'
+    });
+    const page = await context.newPage();
+  
+    await page.goto('https://naivas.online/', {
+      waitUntil: 'domcontentloaded'
+    });
+  
+    page.on('popup', popup => {
+      console.log('Popup intercepted:', popup.url());
+      popup.close(); // Prevents the popup from displaying
+    });
+  
+      const popup_input = page.getByPlaceholder('Search for products');
+
+      let products_map = {};
+
+      for (const product_name of product_names) {
+        await popup_input.fill(product_name);
+        await page.keyboard.press('Enter');
+    
+    
+        await page.waitForSelector('text=Search Results Found');
+    
+        await page.waitForSelector('.grid.grid-cols-2.md\\:grid-cols-3.lg\\:grid-cols-4');
+    
+        const products = await page.$$eval('.border.border-naivas-bg', (productCards) => {
+            return productCards.map(card => {
+            const title = card.querySelector('.text-black-50 a')?.getAttribute('title') || '';
+            const price = card.querySelector('.product-price .font-bold')?.textContent.trim() || '';
+            const imageUrl = card.querySelector('img')?.getAttribute('src') || '';
+        
+            return {
+                title,
+                price,
+                imageUrl,
+                store: 'Naivas',
+            };
+            });
+        });
+
+        const input = await prompt.format({ question: `From this javascript array give me the index of the item that best matches this search query "${product_name}" only return the index as a number, no any other explanations\n\n\n${JSON.stringify(products)}` });
+        const item = await itemIndexParser.parse(await model.predict(input));
+
+        if (item.index > -1 && item.index < products.length) {
+            products_map[product_name] = products[item.index];
+        }
+      }
+  
+    await browser.close();
+
+    return products_map;
+  }
+
+  async function search_from_carrefour(product_names = []) {
+    const browser = await chromium.launch({ headless: false }); // Set headless to false to see the browser
+    const context = await browser.newContext({
+      geolocation: { longitude: 36.74366, latitude: -1.28472 },
+      permissions: ['geolocation']
+    });
+    const page = await context.newPage();
+  
+    await page.goto('https://www.carrefour.ke/mafken/en/', {
+      waitUntil: 'domcontentloaded'
+    });
+  
+    page.on('popup', popup => {
+      console.log('Popup intercepted:', popup.url());
+      popup.close(); // Prevents the popup from displaying
+    });
+  
+      const popup_input = page.getByTestId('header_search__inp').nth(1);
+      let products_map = {};
+  
+      for (const product_name of product_names) {
+        await popup_input.fill(product_name);
+        await page.keyboard.press('Enter');
+    
+    
+        await page.waitForSelector(`text=Search Results For "${product_name.slice(0,15)}`);
+    
+        await page.waitForSelector('ul[data-testid="scrollable-list-view"]');
+    
+        // Extract product details
+        const products = await page.$$eval(
+            'ul[data-testid="scrollable-list-view"] div.css-b9nx4o',
+            (productCards) => {
+                return productCards.map((card) => {
+                    const title = card.querySelector('a[data-testid="product_name"]')?.textContent?.trim() || null;
+                    const price = card.querySelector('div[data-testid="product_price"] .css-14zpref')?.textContent?.trim() || null;
+                    const imageUrl = card.querySelector('div[data-testid="product_card_image"] img')?.src || null;
+    
+                    return {
+                        title,
+                        price,
+                        imageUrl,
+                        store: 'Carrefour',
+                    };
+                });
+            }
+        );
+
+        const input = await prompt.format({ question: `From this javascript array give me the index of the item that best matches this search query "${product_name}" only return the index as a number, no any other explanations\n\n\n${JSON.stringify(products)}` });
+        const item = await itemIndexParser.parse(await model.predict(input));
+
+        if (item.index > -1 && item.index < products.length) {
+            products_map[product_name] = products[item.index];
+        }
+    }
+  
+    await browser.close();
+
+    return products_map;
+  }
 
 // build the indices right heere
 const pinecone = new Pinecone({
@@ -293,7 +414,7 @@ class FoodieAutoShoppingAI {
 
     const bot = new FoodieAutoShoppingAI();
 
-    await bot.chat("swahili pilau recipe", (response) => {
+    await bot.chat("mandazi recipe", (response) => {
         console.clear();
         console.log(response);
     }, async response => {
@@ -301,13 +422,24 @@ class FoodieAutoShoppingAI {
             const { recipee, ingredients } = await bot.generate_shopping_plan(response);
 
             let local_ingredients = [];
+            // combine the two maps, dont override the values, create an array
+            let product_maps = {};
 
-            const product_maps = await search_from_quickmart(ingredients.map(x => x.name));
+            for (const shopping_experience_function of [search_from_quickmart, search_from_naivas, search_from_carrefour]) {
+                const shopping_experience = await shopping_experience_function(ingredients.map(x => x.name));
+
+                for (const ingredient of ingredients) {
+                    product_maps[ingredient.name] = [
+                        ...(product_maps[ingredient.name] ?? []),
+                        shopping_experience[ingredient.name],
+                    ];
+                }
+            }
 
             for (const ingredient of ingredients) {
                 local_ingredients.push({
                     ...ingredient,
-                    shopping_list: product_maps[ingredient.name]
+                    shopping_list: (product_maps[ingredient.name] ?? []).filter(unit => unit)
                 });
             }
 
@@ -318,12 +450,12 @@ class FoodieAutoShoppingAI {
                 ingredients: local_ingredients,
 
                 // start with the initial item selected after that, the user can swap to the correct item
-                total_cost: local_ingredients?.filter(u => u).reduce((acc, x) => {
-                    return {
-                        ...acc,
-                        total: acc.total + (+(x?.shopping_list?.price?.replace('KES', '')?.replaceAll(",","").trim() ?? 0))
-                    }
-                }, { total: 0, currency: 'KES' })
+                // total_cost: local_ingredients?.filter(u => u).reduce((acc, x) => {
+                //     return {
+                //         ...acc,
+                //         total: acc.total + (+(x?.shopping_list?.price?.replace('KES', '')?.replaceAll(",","").trim() ?? 0))
+                //     }
+                // }, { total: 0, currency: 'KES' })
             }, null, 2))
         }
     });
