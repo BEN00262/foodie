@@ -10,14 +10,19 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "@pinecone-database/pinecone": "^1.1.2",
+    "@pinecone-database/pinecone": "^4.0.0",
     "dotenv": "^16.4.5",
     "duck-duck-scrape": "^2.2.4",
+    "epub2": "^3.0.2",
     "file-type": "^19.0.0",
     "find-config": "^1.0.0",
+    "html-to-text": "^9.0.5",
     "langchain": "^0.1.28",
     "pdf-parse": "^1.1.1",
+    "playwright": "^1.49.0",
+    "playwright-chromium": "^1.49.0",
     "puppeteer": "^19.11.1",
+    "puppeteer-core": "^22.6.3",
     "zod": "^3.22.4"
   }
 }
